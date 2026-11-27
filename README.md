@@ -19,21 +19,22 @@ The iPhone Dynamic Island for the MacBook notch. It's a small SwiftUI menu-bar a
 
 **Live Activities**
 - **Now Playing** (Apple Music, Spotify): artwork, waveform in the album colour, progress you can drag, play/pause/next/previous
-- **Timer**: countdown, pause, cancel; alarm opens the island and rings until Stop or Repeat
+- **Timers**: several at once (like iOS 17+); the island shows the one ending soonest, expanded lists up to three with pause / cancel; a finished timer opens the island and rings until Stop or Repeat
+- **Alarm**: rings in the island with Snooze and Stop; Snooze (9 minutes, like iPhone) shows a countdown
 - **Stopwatch**: start, pause, lap, reset
 - **Voice memo**: record from the island; live waveform; saved to `~/Documents/Dynamic Notch Recordings`
 - **Downloads**: Safari, Chrome, Firefox, Edge; progress ring, "Downloaded" when finished
 - **Microphone / camera in use**: orange and green dots
 
 **System alerts**
-- Charging (with battery %), low battery at 20 / 10 / 5 %
+- Charging (with battery %), low battery at 20 / 10 / 5 %; the battery turns yellow in Low Power Mode
 - AirPods / headphones connected, with L / R / Case battery when macOS reports it
 - Silent mode = output muted / unmuted
 - Volume
 - Unlock (the padlock springs open)
 - AirDrop: drag files onto the notch and drop them
 
-Start a timer, stopwatch or voice memo from the menu-bar icon or by right-clicking the island.
+Start a timer, alarm, stopwatch or voice memo from the menu-bar icon or by right-clicking the island.
 
 ## Settings
 
@@ -42,7 +43,7 @@ Start a timer, stopwatch or voice memo from the menu-bar icon or by right-clicki
 - **Show icon in the Dock** / **Show icon in the menu bar**: with both hidden, right-click the island or open the app again to get to Settings
 - Expand on hover, trackpad haptics, and an on/off switch for every activity and alert
 
-Memory: about 16 MB idle and up to about 26 MB with Settings open (Activity Monitor's "Memory" column).
+Memory: about 16 MB idle and under 30 MB at the busiest (three timers, alarm, Settings open) (Activity Monitor's "Memory" column).
 
 ## Not possible on macOS (no public API)
 

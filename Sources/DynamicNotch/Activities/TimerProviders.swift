@@ -1,80 +1,118 @@
 import AppKit
 import SwiftUI
 
-/// Countdown timer like the iPhone Clock timer: pause / cancel from the island, and an alarm
-/// that opens the island and rings until you press Stop (or Repeat).
-@MainActor
-final class TimerProvider: ObservableObject {
-    static let shared = TimerProvider()
+/// One countdown. Running timers have an end date; paused ones keep what was left.
+struct CountdownTimer: Identifiable, Equatable {
+    let id = UUID()
+    var total: TimeInterval
+    var endDate: Date?
+    var pausedRemaining: TimeInterval?
 
-    @Published private(set) var total: TimeInterval = 0
-    @Published private(set) var endDate: Date?
-    @Published private(set) var pausedRemaining: TimeInterval?
-    @Published private(set) var ringing = false
-    private var fireTask: Task<Void, Never>?
-    private var ringTask: Task<Void, Never>?
-
-    var isActive: Bool { endDate != nil || pausedRemaining != nil }
     var isPaused: Bool { pausedRemaining != nil }
 
     func remaining(at date: Date) -> TimeInterval {
         if let pausedRemaining { return pausedRemaining }
-        guard let endDate else { return 0 }
-        return max(0, endDate.timeIntervalSince(date))
+        return max(0, (endDate ?? date).timeIntervalSince(date))
     }
 
-    func progress(at date: Date) -> Double {
-        total > 0 ? remaining(at: date) / total : 0
+    func progress(at date: Date) -> Double { total > 0 ? remaining(at: date) / total : 0 }
+
+    /// "5 min", "1 hr 30 min", "45 sec" — how iPhone names timers.
+    var label: String {
+        let s = Int(total.rounded())
+        let h = s / 3600, m = (s % 3600) / 60, sec = s % 60
+        var parts: [String] = []
+        if h > 0 { parts.append("\(h) hr") }
+        if m > 0 { parts.append("\(m) min") }
+        if sec > 0 && h == 0 { parts.append("\(sec) sec") }
+        return parts.isEmpty ? "Timer" : parts.joined(separator: " ")
     }
+}
+
+/// Countdown timers like the iPhone Clock app (iOS 17+): several can run at once. The island
+/// shows the one ending soonest; the expanded view lists them all. A finished timer opens the
+/// island and rings until Stop (or Repeat).
+@MainActor
+final class TimerProvider: ObservableObject {
+    static let shared = TimerProvider()
+    static let maxShown = 3
+
+    @Published private(set) var timers: [CountdownTimer] = []
+    @Published private(set) var ringing: CountdownTimer?
+    private var fireTask: Task<Void, Never>?
+    private var ringTask: Task<Void, Never>?
+
+    var isActive: Bool { !timers.isEmpty }
+
+    /// Running timers first (soonest end first), then paused ones.
+    var ordered: [CountdownTimer] {
+        let now = Date()
+        return timers.sorted { a, b in
+            if a.isPaused != b.isPaused { return !a.isPaused }
+            return a.remaining(at: now) < b.remaining(at: now)
+        }
+    }
+
+    var current: CountdownTimer? { ordered.first }
 
     func start(seconds: TimeInterval) {
-        stopAlarm()
-        total = seconds
-        pausedRemaining = nil
-        endDate = Date().addingTimeInterval(seconds)
-        schedule()
-        IslandModel.shared.setActive(.timer, true)
+        timers.append(CountdownTimer(total: seconds, endDate: Date().addingTimeInterval(seconds)))
+        changed()
     }
 
-    func togglePause() {
-        if let left = pausedRemaining {
-            pausedRemaining = nil
-            endDate = Date().addingTimeInterval(left)
-            schedule()
-        } else if endDate != nil {
-            pausedRemaining = remaining(at: Date())
-            endDate = nil
-            fireTask?.cancel()
+    func togglePause(_ id: UUID) {
+        guard let i = timers.firstIndex(where: { $0.id == id }) else { return }
+        if let left = timers[i].pausedRemaining {
+            timers[i].pausedRemaining = nil
+            timers[i].endDate = Date().addingTimeInterval(left)
+        } else {
+            timers[i].pausedRemaining = timers[i].remaining(at: Date())
+            timers[i].endDate = nil
         }
+        changed()
     }
 
-    func cancel() {
-        fireTask?.cancel()
-        endDate = nil
-        pausedRemaining = nil
-        IslandModel.shared.setActive(.timer, false)
+    func cancel(_ id: UUID) {
+        timers.removeAll { $0.id == id }
+        changed()
     }
 
-    private func schedule() {
+    func cancelAll() {
+        timers.removeAll()
+        changed()
+    }
+
+    private func changed() {
+        IslandModel.shared.setActive(.timer, !timers.isEmpty)
+        scheduleNext()
+    }
+
+    /// One sleeping task for whichever running timer ends next.
+    private func scheduleNext() {
         fireTask?.cancel()
-        guard let endDate else { return }
+        guard let next = timers.compactMap(\.endDate).min() else { return }
         fireTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(max(0, endDate.timeIntervalSinceNow)))
+            try? await Task.sleep(for: .seconds(max(0, next.timeIntervalSinceNow)))
             guard !Task.isCancelled else { return }
-            self?.fire()
+            self?.fireDue()
         }
     }
 
-    private func fire() {
-        endDate = nil
-        pausedRemaining = nil
-        IslandModel.shared.setActive(.timer, false)
-        ringing = true
+    private func fireDue() {
+        let now = Date()
+        let due = timers.filter { ($0.endDate ?? .distantFuture) <= now.addingTimeInterval(0.05) }
+        timers.removeAll { t in due.contains { $0.id == t.id } }
+        changed()
+        if let first = due.first { ring(first) }
+    }
+
+    private func ring(_ timer: CountdownTimer) {
+        ringing = timer
         IslandModel.shared.setActive(.timerDone, true)
         IslandModel.shared.expand(alerting: true)
+        ringTask?.cancel()
         ringTask = Task { @MainActor in
-            // Ring for up to a minute, like an alarm.
-            for _ in 0..<40 {
+            for _ in 0..<40 {   // about a minute, like an alarm
                 NSSound(named: "Glass")?.play()
                 try? await Task.sleep(for: .seconds(1.5))
                 if Task.isCancelled { return }
@@ -84,13 +122,13 @@ final class TimerProvider: ObservableObject {
 
     func stopAlarm() {
         ringTask?.cancel()
-        guard ringing else { return }
-        ringing = false
+        guard ringing != nil else { return }
+        ringing = nil
         IslandModel.shared.setActive(.timerDone, false)
     }
 
     func repeatTimer() {
-        let seconds = total
+        guard let seconds = ringing?.total else { return }
         stopAlarm()
         start(seconds: seconds)
     }

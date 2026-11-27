@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem = item
 
         // Start every monitor. Each one reports into IslandModel.shared.
+        AlarmProvider.shared.start()
         MusicProvider.shared.start()
         PrivacyMonitor.shared.start()
         BatteryMonitor.shared.start()
@@ -166,7 +167,8 @@ enum AppMenu {
         let stopwatch = StopwatchProvider.shared
         let recorder = RecorderProvider.shared
 
-        let timerItem = NSMenuItem(title: "Timer", action: nil, keyEquivalent: "")
+        let alarms = AlarmProvider.shared
+        let timerItem = NSMenuItem(title: "New Timer", action: nil, keyEquivalent: "")
         let timerMenu = NSMenu()
         for minutes in [1, 3, 5, 10, 15, 20, 30, 45, 60] {
             timerMenu.addItem(ClosureMenuItem("\(minutes) min") { timers.start(seconds: TimeInterval(minutes * 60)) })
@@ -175,10 +177,28 @@ enum AppMenu {
         timerMenu.addItem(ClosureMenuItem("Custom…") { askCustomTimer() })
         timerItem.submenu = timerMenu
         menu.addItem(timerItem)
-        if timers.isActive {
-            menu.addItem(ClosureMenuItem(timers.isPaused ? "Resume Timer" : "Pause Timer") { timers.togglePause() })
-            menu.addItem(ClosureMenuItem("Cancel Timer") { timers.cancel() })
+        for timer in timers.ordered {
+            let item = NSMenuItem(title: "Timer \(timer.label)\(timer.isPaused ? " (paused)" : "")", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            sub.addItem(ClosureMenuItem(timer.isPaused ? "Resume" : "Pause") { timers.togglePause(timer.id) })
+            sub.addItem(ClosureMenuItem("Cancel") { timers.cancel(timer.id) })
+            item.submenu = sub
+            menu.addItem(item)
         }
+
+        let alarmItem = NSMenuItem(title: "Alarms", action: nil, keyEquivalent: "")
+        let alarmMenu = NSMenu()
+        alarmMenu.addItem(ClosureMenuItem("Add Alarm…") { alarms.askNewAlarm() })
+        if !alarms.alarms.isEmpty { alarmMenu.addItem(.separator()) }
+        for alarm in alarms.alarms {
+            let item = NSMenuItem(title: alarm.date.formatted(date: .abbreviated, time: .shortened), action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            sub.addItem(ClosureMenuItem("Delete") { alarms.remove(alarm.id) })
+            item.submenu = sub
+            alarmMenu.addItem(item)
+        }
+        alarmItem.submenu = alarmMenu
+        menu.addItem(alarmItem)
 
         if stopwatch.isActive {
             menu.addItem(ClosureMenuItem(stopwatch.isRunning ? "Stop Stopwatch" : "Resume Stopwatch") { stopwatch.toggle() })

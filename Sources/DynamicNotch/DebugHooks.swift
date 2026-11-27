@@ -21,7 +21,11 @@ enum DebugHooks {
         let parts = command.split(separator: ":").map(String.init)
         switch parts.first ?? "" {
         case "timer": TimerProvider.shared.start(seconds: Double(parts.dropFirst().first ?? "60") ?? 60)
-        case "canceltimer": TimerProvider.shared.cancel()
+        case "canceltimer": TimerProvider.shared.cancelAll()
+        case "alarm": AlarmProvider.shared.add(date: Date().addingTimeInterval(Double(parts.dropFirst().first ?? "5") ?? 5))
+        case "snooze": AlarmProvider.shared.snooze()
+        case "stopalarm": AlarmProvider.shared.stop()
+        case "stoptimer": TimerProvider.shared.stopAlarm()
         case "stopwatch": StopwatchProvider.shared.toggle()
         case "resetstopwatch": StopwatchProvider.shared.reset()
         case "record": RecorderProvider.shared.toggle()

@@ -4,7 +4,7 @@ import SwiftUI
 /// Ongoing Live Activities. Earlier cases win when several run at once (system activities
 /// first, like on iPhone).
 enum ActivityID: Int, CaseIterable, Comparable {
-    case timerDone, recording, timer, stopwatch, music, download
+    case alarm, timerDone, recording, snooze, timer, stopwatch, music, download
 
     static func < (a: ActivityID, b: ActivityID) -> Bool { a.rawValue < b.rawValue }
 }
@@ -80,7 +80,7 @@ final class IslandModel: ObservableObject {
     @Published var cameraInUse = false
     @Published var mouseInside = false
     /// Set while an expanded view must stay open even when the pointer leaves (timer alarm).
-    var holdOpen: Bool { active.contains(.timerDone) }
+    var holdOpen: Bool { active.contains(.alarm) || active.contains(.timerDone) }
 
     private var alertTask: Task<Void, Never>?
     private var autoCollapseTask: Task<Void, Never>?
@@ -88,6 +88,7 @@ final class IslandModel: ObservableObject {
     // MARK: Activities
 
     var primary: ActivityID? {
+        if active.contains(.alarm) { return .alarm }
         if active.contains(.timerDone) { return .timerDone }
         if let pinned, active.contains(pinned) { return pinned }
         return active.sorted().first

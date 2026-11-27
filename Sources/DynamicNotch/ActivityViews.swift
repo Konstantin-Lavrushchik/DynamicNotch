@@ -8,6 +8,7 @@ enum ActivityViews {
         switch id {
         case .music: 128
         case .download: 74
+        case .timer: 68 + 48 * CGFloat(max(0, min(TimerProvider.shared.timers.count, TimerProvider.maxShown) - 1))
         default: 68
         }
     }
@@ -15,6 +16,8 @@ enum ActivityViews {
     static func leading(_ id: ActivityID) -> AnyView {
         switch id {
         case .music: AnyView(MusicArtwork(size: 22, corner: 6))
+        case .alarm: AnyView(Image(systemName: "alarm.fill").font(.system(size: 14)).foregroundStyle(.orange).symbolEffect(.bounce, options: .repeating))
+        case .snooze: AnyView(Image(systemName: "alarm").font(.system(size: 14, weight: .semibold)).foregroundStyle(.orange))
         case .timer: AnyView(Image(systemName: "timer").font(.system(size: 15, weight: .semibold)).foregroundStyle(.orange))
         case .timerDone: AnyView(Image(systemName: "bell.fill").font(.system(size: 14)).foregroundStyle(.orange).symbolEffect(.bounce, options: .repeating))
         case .stopwatch: AnyView(Image(systemName: "stopwatch").font(.system(size: 15, weight: .semibold)).foregroundStyle(.orange))
@@ -26,6 +29,8 @@ enum ActivityViews {
     static func trailing(_ id: ActivityID) -> AnyView {
         switch id {
         case .music: AnyView(MusicWaveform(height: 14))
+        case .alarm: AnyView(AlarmTime(size: 13))
+        case .snooze: AnyView(SnoozeText(size: 13))
         case .timer: AnyView(TimerText(size: 13))
         case .timerDone: AnyView(Text("Done").font(.system(size: 13, weight: .semibold)).foregroundStyle(.orange))
         case .stopwatch: AnyView(StopwatchText(size: 13, precise: false))
@@ -37,6 +42,8 @@ enum ActivityViews {
     static func minimal(_ id: ActivityID) -> AnyView {
         switch id {
         case .music: AnyView(MusicArtwork(size: 18, corner: 9))
+        case .alarm: AnyView(Image(systemName: "alarm.fill").font(.system(size: 12)).foregroundStyle(.orange))
+        case .snooze: AnyView(Image(systemName: "alarm").font(.system(size: 12, weight: .semibold)).foregroundStyle(.orange))
         case .timer: AnyView(TimerRing(size: 18))
         case .timerDone: AnyView(Image(systemName: "bell.fill").font(.system(size: 12)).foregroundStyle(.orange))
         case .stopwatch: AnyView(Image(systemName: "stopwatch").font(.system(size: 13, weight: .semibold)).foregroundStyle(.orange))
@@ -48,6 +55,8 @@ enum ActivityViews {
     static func expanded(_ id: ActivityID) -> AnyView {
         switch id {
         case .music: AnyView(MusicExpanded())
+        case .alarm: AnyView(AlarmExpanded())
+        case .snooze: AnyView(SnoozeExpanded())
         case .timer: AnyView(TimerExpanded())
         case .timerDone: AnyView(TimerDoneExpanded())
         case .stopwatch: AnyView(StopwatchExpanded())
@@ -64,9 +73,8 @@ enum ActivityActions {
         switch id {
         case .music: MusicProvider.shared.openApp()
         case .download: DownloadsMonitor.shared.openFolder()
-        case .recording: IslandModel.shared.expand()
-        case .timer, .stopwatch: IslandModel.shared.expand()
-        case .timerDone: break
+        case .recording, .timer, .stopwatch, .snooze: IslandModel.shared.expand()
+        case .timerDone, .alarm: break
         }
     }
 }
@@ -215,29 +223,31 @@ struct MusicExpanded: View {
 // MARK: - Timer
 
 struct TimerText: View {
-    @ObservedObject private var timer = TimerProvider.shared
+    @ObservedObject private var timers = TimerProvider.shared
+    var id: UUID? = nil   // nil = the timer ending soonest
     let size: CGFloat
 
     var body: some View {
+        let timer = id.flatMap { id in timers.timers.first { $0.id == id } } ?? timers.current
         TimelineView(.periodic(from: .now, by: 0.25)) { context in
-            Text(TimeFormat.clock(timer.remaining(at: context.date)))
+            Text(TimeFormat.clock(timer?.remaining(at: context.date) ?? 0))
                 .font(.system(size: size, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.orange)
                 .contentTransition(.numericText(countsDown: true))
-                .opacity(timer.isPaused ? 0.55 : 1)
+                .opacity(timer?.isPaused == true ? 0.55 : 1)
         }
     }
 }
 
 struct TimerRing: View {
-    @ObservedObject private var timer = TimerProvider.shared
+    @ObservedObject private var timers = TimerProvider.shared
     let size: CGFloat
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
             ZStack {
                 Circle().stroke(Color.orange.opacity(0.3), lineWidth: 2.5)
-                Circle().trim(from: 0, to: timer.progress(at: context.date))
+                Circle().trim(from: 0, to: timers.current?.progress(at: context.date) ?? 0)
                     .stroke(Color.orange, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
@@ -246,18 +256,28 @@ struct TimerRing: View {
     }
 }
 
+/// One row per timer (up to three), like the iPhone timers Live Activity.
 struct TimerExpanded: View {
-    @ObservedObject private var timer = TimerProvider.shared
+    @ObservedObject private var timers = TimerProvider.shared
 
     var body: some View {
-        HStack(spacing: 10) {
-            CircleButton(symbol: timer.isPaused ? "play.fill" : "pause.fill", tint: .orange,
-                         background: Color.orange.opacity(0.25)) { timer.togglePause() }
-            CircleButton(symbol: "xmark") { timer.cancel() }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 0) {
-                Text("Timer").font(.system(size: 12, weight: .medium)).foregroundStyle(.orange)
-                TimerText(size: 34)
+        let list = Array(timers.ordered.prefix(TimerProvider.maxShown))
+        VStack(spacing: 8) {
+            ForEach(Array(list.enumerated()), id: \.element.id) { index, timer in
+                let first = index == 0
+                HStack(spacing: 10) {
+                    CircleButton(symbol: timer.isPaused ? "play.fill" : "pause.fill", tint: .orange,
+                                 background: Color.orange.opacity(0.25), size: first ? 40 : 34) { timers.togglePause(timer.id) }
+                    CircleButton(symbol: "xmark", size: first ? 40 : 34) { timers.cancel(timer.id) }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(timer.label).font(.system(size: 12, weight: .medium)).foregroundStyle(.orange)
+                        TimerText(id: timer.id, size: first ? 34 : 24)
+                    }
+                }
+            }
+            if timers.timers.count > list.count {
+                Text("+\(timers.timers.count - list.count) more").font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
             }
         }
     }
@@ -275,7 +295,7 @@ struct TimerDoneExpanded: View {
                 .background(Circle().fill(Color.orange.opacity(0.22)))
                 .symbolEffect(.bounce, options: .repeating)
             VStack(alignment: .leading, spacing: 0) {
-                Text("Timer").font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.6))
+                Text(timer.ringing?.label ?? "Timer").font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.6))
                 Text("Done").font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
             }
             Spacer()
@@ -437,5 +457,88 @@ struct DownloadExpanded: View {
         let f = ByteCountFormatter()
         if let total = item.total { return "\(f.string(fromByteCount: item.bytes)) of \(f.string(fromByteCount: total))" }
         return f.string(fromByteCount: item.bytes)
+    }
+}
+
+// MARK: - Alarm
+
+struct AlarmTime: View {
+    @ObservedObject private var alarms = AlarmProvider.shared
+    let size: CGFloat
+    var body: some View {
+        Text(alarms.ringing?.timeText ?? "")
+            .font(.system(size: size, weight: .semibold).monospacedDigit())
+            .foregroundStyle(.orange)
+    }
+}
+
+struct AlarmExpanded: View {
+    @ObservedObject private var alarms = AlarmProvider.shared
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "alarm.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(Color.orange.opacity(0.22)))
+                .symbolEffect(.bounce, options: .repeating)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Alarm").font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.6))
+                Text(alarms.ringing?.timeText ?? "").font(.system(size: 22, weight: .semibold).monospacedDigit()).foregroundStyle(.white)
+            }
+            Spacer()
+            Button { alarms.snooze() } label: {
+                Text("Snooze")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 86, height: 40)
+                    .background(Capsule().fill(Color.white.opacity(0.18)))
+            }
+            .buttonStyle(PressScale())
+            Button { alarms.stop() } label: {
+                Text("Stop")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.black)
+                    .frame(width: 76, height: 40)
+                    .background(Capsule().fill(Color.orange))
+            }
+            .buttonStyle(PressScale())
+        }
+    }
+}
+
+struct SnoozeText: View {
+    @ObservedObject private var alarms = AlarmProvider.shared
+    let size: CGFloat
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+            Text(TimeFormat.clock(alarms.snoozeRemaining(at: context.date)))
+                .font(.system(size: size, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.orange)
+                .contentTransition(.numericText(countsDown: true))
+        }
+    }
+}
+
+struct SnoozeExpanded: View {
+    @ObservedObject private var alarms = AlarmProvider.shared
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button { alarms.stop() } label: {
+                Text("Stop")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 76, height: 40)
+                    .background(Capsule().fill(Color.white.opacity(0.18)))
+            }
+            .buttonStyle(PressScale())
+            Spacer()
+            VStack(alignment: .trailing, spacing: 0) {
+                Text("Snooze").font(.system(size: 12, weight: .medium)).foregroundStyle(.orange)
+                SnoozeText(size: 34)
+            }
+        }
     }
 }

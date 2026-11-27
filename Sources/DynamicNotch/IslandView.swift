@@ -202,7 +202,7 @@ struct AlertView: View {
     @ViewBuilder private var leading: some View {
         switch alert.kind {
         case .charging:
-            Label("Charging", systemImage: "bolt.fill").labelStyle(TightLabel(color: .green)).padding(.leading, 10)
+            Label("Charging", systemImage: "bolt.fill").labelStyle(TightLabel(color: lowPower ? .yellow : .green)).padding(.leading, 10)
         case .lowBattery:
             Label("Low Battery", systemImage: "battery.25percent").labelStyle(TightLabel(color: .red)).padding(.leading, 10)
         case .silent(let on):
@@ -224,17 +224,22 @@ struct AlertView: View {
         }
     }
 
+    /// Low Power Mode turns the battery yellow, as on iPhone.
+    private var lowPower: Bool { ProcessInfo.processInfo.isLowPowerModeEnabled }
+
     @ViewBuilder private var trailing: some View {
         switch alert.kind {
         case .charging(let percent):
+            let color: Color = lowPower ? .yellow : .green
             HStack(spacing: 4) {
-                Text("\(percent)%").foregroundStyle(.green).monospacedDigit()
-                BatteryGlyph(percent: percent, color: .green)
+                Text("\(percent)%").foregroundStyle(color).monospacedDigit()
+                BatteryGlyph(percent: percent, color: color)
             }.padding(.trailing, 10)
         case .lowBattery(let percent):
+            let color: Color = lowPower ? .yellow : .red
             HStack(spacing: 4) {
-                Text("\(percent)%").foregroundStyle(.red).monospacedDigit()
-                BatteryGlyph(percent: percent, color: .red)
+                Text("\(percent)%").foregroundStyle(color).monospacedDigit()
+                BatteryGlyph(percent: percent, color: color)
             }.padding(.trailing, 10)
         case .silent(let on):
             Text(on ? "Silent" : "Ring").foregroundStyle(on ? .red : .white).padding(.trailing, 12)
