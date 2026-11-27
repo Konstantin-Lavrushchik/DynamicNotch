@@ -2,13 +2,14 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: NotchPanelController?
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Prefs.registerDefaults()
+        quitOtherCopies()
         panel = NotchPanelController()
         panel?.show()
 
@@ -26,19 +27,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LockMonitor.shared.start()
         DownloadsMonitor.shared.start()
         DebugHooks.installIfEnabled()
+
+        applyAppearancePrefs()
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyAppearancePrefs() }
+        }
+
+        // First launch always shows Settings once; after that only if "Start minimized" is off.
+        if !Prefs.on(Prefs.didFirstLaunch) || !Prefs.on(Prefs.startMinimized) {
+            UserDefaults.standard.set(true, forKey: Prefs.didFirstLaunch)
+            openSettings()
+        }
+    }
+
+    /// Opening the app again (Finder, Spotlight, Dock) shows Settings — the way back in when
+    /// both icons are hidden.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openSettings()
+        return false
+    }
+
+    private func applyAppearancePrefs() {
+        let dock = Prefs.on(Prefs.showDockIcon)
+        let policy: NSApplication.ActivationPolicy = dock ? .regular : .accessory
+        if NSApp.activationPolicy() != policy {
+            NSApp.setActivationPolicy(policy)
+            // Switching back to accessory hides open windows; keep Settings in front.
+            if !dock, settingsWindow != nil {
+                DispatchQueue.main.async { NSApp.activate(ignoringOtherApps: true); self.settingsWindow?.makeKeyAndOrderFront(nil) }
+            }
+        }
+        statusItem?.isVisible = Prefs.on(Prefs.showMenuBarIcon)
+    }
+
+    /// Only one island at a time: a newly started copy replaces an older one.
+    private func quitOtherCopies() {
+        let me = NSRunningApplication.current
+        for other in NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+        where other.processIdentifier != me.processIdentifier {
+            other.terminate()
+        }
     }
 
     func openSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
+            let window = NSWindow(contentViewController: SettingsViewController())
             window.title = "Dynamic Notch Settings"
-            window.styleMask = [.titled, .closable]
+            window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.center()
             settingsWindow = window
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+        settingsWindow?.orderFrontRegardless()
+    }
+
+    /// Drop the Settings window when it closes so its views don't stay in memory.
+    func windowWillClose(_ notification: Notification) {
+        guard (notification.object as? NSWindow) === settingsWindow else { return }
+        DispatchQueue.main.async { self.settingsWindow = nil }
     }
 }
 

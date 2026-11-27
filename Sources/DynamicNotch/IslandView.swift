@@ -310,16 +310,38 @@ struct BatteryRing: View {
     }
 }
 
-/// The padlock that springs open after unlocking (Face ID animation on iPhone).
+/// The padlock that springs open after unlocking (Face ID animation on iPhone). Drawn by hand:
+/// SF Symbol replace transitions cost ~50 MB of memory for a moment.
 struct UnlockGlyph: View {
     @StateObject private var opened = Box(false)
+
     var body: some View {
-        Image(systemName: opened.v ? "lock.open.fill" : "lock.fill")
-            .font(.system(size: 14, weight: .semibold))
-            .contentTransition(.symbolEffect(.replace))
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { withAnimation(.island) { opened.v = true } }
-            }
+        ZStack(alignment: .bottom) {
+            Shackle()
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .frame(width: 9, height: 9)
+                .rotationEffect(.degrees(opened.v ? -28 : 0), anchor: .bottomLeading)
+                .offset(x: opened.v ? -1 : 0, y: opened.v ? -9 : -7)
+            RoundedRectangle(cornerRadius: 2.5)
+                .fill(Color.white)
+                .frame(width: 13, height: 10)
+        }
+        .frame(width: 16, height: 20)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { withAnimation(.island) { opened.v = true } }
+        }
+    }
+}
+
+/// Upside-down U of the padlock.
+struct Shackle: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.midY))
+        p.addArc(center: CGPoint(x: r.midX, y: r.midY), radius: r.width / 2, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+        return p
     }
 }
 

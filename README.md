@@ -35,9 +35,22 @@ The iPhone Dynamic Island for the MacBook notch. It's a small SwiftUI menu-bar a
 
 Start a timer, stopwatch or voice memo from the menu-bar icon or by right-clicking the island.
 
+## Settings
+
+- **Open at login**
+- **Start minimized**: no window at launch (the first launch always shows Settings once)
+- **Show icon in the Dock** / **Show icon in the menu bar**: with both hidden, right-click the island or open the app again to get to Settings
+- Expand on hover, trackpad haptics, and an on/off switch for every activity and alert
+
+Memory: about 16 MB idle and up to about 26 MB with Settings open (Activity Monitor's "Memory" column).
+
 ## Not possible on macOS (no public API)
 
 Phone/FaceTime calls, Maps directions, Apple Pay, Face ID, other apps' Live Activities (including the iPhone's, which macOS 26 already shows in the menu bar), brightness. Now Playing only works for Music and Spotify, because other players have no public API.
+
+## Install
+
+Open `DynamicNotch-<version>.dmg` and drag **Dynamic Notch** to **Applications**.
 
 ## Build
 
@@ -46,6 +59,7 @@ Needs macOS 15+ and the Xcode Command Line Tools (full Xcode not required).
 ```bash
 ./build.sh            # builds build/DynamicNotch.app
 ./build.sh --install  # copies it to ~/Applications and starts it
+tools/make-dmg.sh     # makes the drag-to-Applications installer in ~/Downloads
 ```
 
 On first use macOS asks for Automation (Music/Spotify), Bluetooth, Microphone (voice memos) and Downloads folder access. The app is signed locally (ad-hoc), so it is not notarised.

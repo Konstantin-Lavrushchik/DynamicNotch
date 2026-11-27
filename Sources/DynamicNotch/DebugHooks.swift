@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Test hook, only active when started with DYNAMICNOTCH_DEBUG=1:
 ///   open --env DYNAMICNOTCH_DEBUG=1 ~/Applications/DynamicNotch.app
@@ -26,6 +26,8 @@ enum DebugHooks {
         case "resetstopwatch": StopwatchProvider.shared.reset()
         case "record": RecorderProvider.shared.toggle()
         case "expand": model.expand()
+        case "settings": (NSApp.delegate as? AppDelegate)?.openSettings()
+        case "closesettings": NSApp.windows.first { $0.title.contains("Settings") }?.performClose(nil)
         case "collapse": model.collapse()
         case "swipe-up": model.swipe(.up)
         case "swipe-side": model.swipe(.sideways)
