@@ -33,6 +33,14 @@ enum DebugHooks {
         case "state":
             NSLog("DynamicNotch music: source=%@ title=%@ artist=%@ playing=%d artwork=%d dur=%.0f pos=%.0f", String(describing: MusicProvider.shared.source), MusicProvider.shared.title, MusicProvider.shared.artist, MusicProvider.shared.isPlaying ? 1 : 0, MusicProvider.shared.artwork == nil ? 0 : 1, MusicProvider.shared.duration, MusicProvider.shared.position(at: Date()))
             NSLog("DynamicNotch state: alert=%@ active=%@ primary=%@ expanded=%d hidden=%d size=%@ mic=%d cam=%d", String(describing: model.alert?.kind), String(describing: model.active.sorted().map { "\($0)" }), String(describing: model.primary), model.expanded ? 1 : 0, model.hidden ? 1 : 0, NSStringFromSize(model.size), model.micInUse ? 1 : 0, model.cameraInUse ? 1 : 0)
+        case "music":
+            switch parts.dropFirst().first ?? "" {
+            case "toggle": MusicProvider.shared.togglePlay()
+            case "next": MusicProvider.shared.next()
+            case "prev": MusicProvider.shared.previous()
+            case "seek": MusicProvider.shared.seek(to: Double(parts.dropFirst(2).first ?? "0") ?? 0)
+            default: break
+            }
         case "closesettings": NSApp.windows.first { $0.title.contains("Settings") }?.performClose(nil)
         case "collapse": model.collapse()
         case "swipe-up": model.swipe(.up)
