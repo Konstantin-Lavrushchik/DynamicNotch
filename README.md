@@ -32,7 +32,6 @@ The iPhone Dynamic Island for the MacBook notch. It's a small SwiftUI menu-bar a
 - Silent mode = output muted / unmuted
 - Volume
 - Unlock (the padlock springs open)
-- AirDrop: drag files onto the notch and drop them
 
 Start a timer, alarm, stopwatch or voice memo from the menu-bar icon or by right-clicking the island.
 
@@ -71,5 +70,5 @@ Start with `open --env DYNAMICNOTCH_DEBUG=1 ~/Applications/DynamicNotch.app`, th
 
 ```bash
 swiftc tools/dn.swift -o .build/dn
-.build/dn timer:90        # also: stopwatch, expand, collapse, switch, alert:charging, alert:airpods, dropzone:on
+.build/dn timer:90        # also: stopwatch, expand, collapse, switch, alert:charging, alert:airpods
 ```

@@ -46,7 +46,6 @@ enum DebugHooks {
         case "swipe-up": model.swipe(.up)
         case "swipe-side": model.swipe(.sideways)
         case "switch": model.switchToSecondary()
-        case "dropzone": model.setDropZone(parts.dropFirst().first == "on")
         case "alert":
             switch parts.dropFirst().first ?? "" {
             case "charging": model.show(.charging(percent: 64), for: 4)

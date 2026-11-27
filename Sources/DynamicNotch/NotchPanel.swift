@@ -24,7 +24,6 @@ final class NotchPanelController {
     private var monitors: [Any] = []
     private var hoverTask: Task<Void, Never>?
     private var leaveTask: Task<Void, Never>?
-    private var dragChangeCount = NSPasteboard(name: .drag).changeCount
     private var scrollAccum = CGSize.zero
     private var scrollLocked = false
 
@@ -82,12 +81,7 @@ final class NotchPanelController {
     private func handleGlobal(_ event: NSEvent) {
         switch event.type {
         case .leftMouseDown, .rightMouseDown:
-            dragChangeCount = NSPasteboard(name: .drag).changeCount
             if model.expanded && !isInside() { model.collapse() }
-        case .leftMouseDragged:
-            updateDropZone()
-        case .leftMouseUp:
-            endDrag()
         default:
             break
         }
@@ -101,10 +95,6 @@ final class NotchPanelController {
             return nil
         case .rightMouseDown:
             if isInside() { AppMenu.popUpAtMouse(); return nil }
-        case .leftMouseDragged:
-            updateDropZone()
-        case .leftMouseUp:
-            endDrag()
         default:
             break
         }
@@ -121,7 +111,7 @@ final class NotchPanelController {
 
     private func updatePointer() {
         let inside = isInside()
-        panel.ignoresMouseEvents = !(inside || model.dropZone)
+        panel.ignoresMouseEvents = !inside
         if inside != model.mouseInside { model.mouseInside = inside }
 
         if inside {
@@ -145,29 +135,6 @@ final class NotchPanelController {
                     self.leaveTask = nil
                 }
             }
-        }
-    }
-
-    // MARK: - Drag a file to the notch → AirDrop
-
-    private func updateDropZone() {
-        let pasteboard = NSPasteboard(name: .drag)
-        guard pasteboard.changeCount != dragChangeCount,
-              pasteboard.types?.contains(.fileURL) == true else { return }
-        let screen = model.notch.screenFrame
-        let zone = CGRect(x: screen.midX - 260, y: screen.maxY - 170, width: 520, height: 172)
-        let near = zone.contains(NSEvent.mouseLocation)
-        if near != model.dropZone { model.setDropZone(near) }
-        panel.ignoresMouseEvents = !(near || isInside())
-    }
-
-    private func endDrag() {
-        guard model.dropZone else { return }
-        // Give SwiftUI's onDrop a moment to receive the files first.
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(400))
-            self?.model.setDropZone(false)
-            self?.dragChangeCount = NSPasteboard(name: .drag).changeCount
         }
     }
 

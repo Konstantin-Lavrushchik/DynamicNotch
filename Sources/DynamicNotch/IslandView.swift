@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Flat top attached to the screen edge, small outward flares at the top corners (like the
 /// MacBook notch) and round bottom corners. All three animate.
@@ -58,7 +57,7 @@ struct IslandView: View {
                     .frame(width: size.width, height: size.height, alignment: .top)
                     .clipShape(shape)
             }
-            .shadow(color: .black.opacity(model.expanded || model.dropZone ? 0.45 : 0), radius: 14, y: 6)
+            .shadow(color: .black.opacity(model.expanded ? 0.45 : 0), radius: 14, y: 6)
             .overlay(alignment: .topTrailing) { bubble }
             .contentShape(shape)
             .onTapGesture {
@@ -78,10 +77,6 @@ struct IslandView: View {
                     if abs(dx) > abs(dy) { model.swipe(.sideways) } else if dy < 0 { model.swipe(.up) } else { model.swipe(.down) }
                 }
             )
-            .onDrop(of: [.fileURL], isTargeted: $model.dropTargeted) { providers in
-                AirDrop.send(providers)
-                return true
-            }
             .animation(.island, value: size)
             .animation(.island, value: model.topRadius)
             .animation(.island, value: model.bottomRadius)
@@ -93,9 +88,6 @@ struct IslandView: View {
             if let alert = model.alert {
                 AlertView(alert: alert, notch: n)
                     .id(alert.id)
-                    .transition(.islandContent)
-            } else if model.dropZone {
-                AirDropZone(targeted: model.dropTargeted, notch: n)
                     .transition(.islandContent)
             } else if model.expanded, let p = model.primary {
                 ActivityViews.expanded(p)
@@ -225,8 +217,6 @@ struct AlertView: View {
             UnlockGlyph().padding(.leading, 8)
         case .downloaded:
             Label("Downloaded", systemImage: "arrow.down.circle.fill").labelStyle(TightLabel(color: .blue)).padding(.leading, 10)
-        case .airdrop:
-            Label("AirDrop", systemImage: "airplayaudio").labelStyle(TightLabel(color: .blue)).padding(.leading, 10)
         }
     }
 
@@ -269,8 +259,6 @@ struct AlertView: View {
             Color.clear   // EmptyView would take no width and shift the whole row right
         case .downloaded(let name):
             Text(name).truncationMode(.middle).foregroundStyle(.white.opacity(0.85)).padding(.trailing, 10)
-        case .airdrop(let count):
-            Text(count == 1 ? "1 file" : "\(count) files").foregroundStyle(.white.opacity(0.85)).padding(.trailing, 10)
         }
     }
 }
@@ -353,56 +341,5 @@ struct Shackle: Shape {
         p.addArc(center: CGPoint(x: r.midX, y: r.midY), radius: r.width / 2, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
         p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
         return p
-    }
-}
-
-// MARK: - AirDrop
-
-struct AirDropZone: View {
-    let targeted: Bool
-    let notch: CGSize
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "airplayaudio")
-                .font(.system(size: 30, weight: .medium))
-                .foregroundStyle(targeted ? .white : .blue)
-                .symbolEffect(.pulse, isActive: !targeted)
-            Text(targeted ? "Release to AirDrop" : "Drop here to AirDrop")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
-                .foregroundStyle(targeted ? Color.blue : Color.white.opacity(0.3))
-                .background(RoundedRectangle(cornerRadius: 20).fill(Color.blue.opacity(targeted ? 0.25 : 0.06)))
-        )
-        .padding(.top, notch.height + 4)
-        .padding([.horizontal, .bottom], 14)
-        .animation(.islandSoft, value: targeted)
-    }
-}
-
-@MainActor
-enum AirDrop {
-    static func send(_ providers: [NSItemProvider]) {
-        var urls: [URL] = []
-        let group = DispatchGroup()
-        let lock = NSLock()
-        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            group.enter()
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url { lock.lock(); urls.append(url); lock.unlock() }
-                group.leave()
-            }
-        }
-        group.notify(queue: .main) {
-            guard !urls.isEmpty, let service = NSSharingService(named: .sendViaAirDrop) else { return }
-            NSApp.activate(ignoringOtherApps: true)
-            service.perform(withItems: urls)
-            IslandModel.shared.show(.airdrop(count: urls.count))
-        }
     }
 }

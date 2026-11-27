@@ -28,7 +28,6 @@ struct IslandAlert: Identifiable, Equatable {
         case headphones(name: String, symbol: String, batteries: [HeadphoneBattery])
         case unlocked
         case downloaded(name: String)
-        case airdrop(count: Int)
 
         var category: Int {
             switch self {
@@ -39,7 +38,6 @@ struct IslandAlert: Identifiable, Equatable {
             case .headphones: 4
             case .unlocked: 5
             case .downloaded: 6
-            case .airdrop: 7
             }
         }
     }
@@ -75,8 +73,6 @@ final class IslandModel: ObservableObject {
     @Published private(set) var alert: IslandAlert?
     @Published private(set) var active: Set<ActivityID> = []
     @Published private(set) var pinned: ActivityID?
-    @Published private(set) var dropZone = false
-    @Published var dropTargeted = false
     @Published var micInUse = false
     @Published var cameraInUse = false
     @Published var mouseInside = false
@@ -102,7 +98,7 @@ final class IslandModel: ObservableObject {
 
     var privacyDot: Bool { (micInUse || cameraInUse) && Prefs.on(Prefs.showPrivacy) }
 
-    var showBubble: Bool { !expanded && !dropZone && alert == nil && !hidden && secondary != nil }
+    var showBubble: Bool { !expanded && alert == nil && !hidden && secondary != nil }
 
     func setActive(_ id: ActivityID, _ on: Bool) {
         guard on != active.contains(id) else { return }
@@ -181,14 +177,6 @@ final class IslandModel: ObservableObject {
         }
     }
 
-    func setDropZone(_ on: Bool) {
-        guard on != dropZone else { return }
-        withAnimation(.island) {
-            dropZone = on
-            if !on { dropTargeted = false }
-        }
-    }
-
     // MARK: Alerts
 
     func show(_ kind: IslandAlert.Kind, for seconds: Double = 2.6) {
@@ -215,17 +203,16 @@ final class IslandModel: ObservableObject {
     var topRadius: CGFloat { isIdle ? 0 : Self.flare }
 
     var bottomRadius: CGFloat {
-        if dropZone || (expanded && alert == nil) { return 30 }
+        if expanded && alert == nil { return 30 }
         return isIdle ? min(10, notch.size.height / 3) : notch.size.height / 2
     }
 
     var isIdle: Bool {
-        alert == nil && !dropZone && (primary == nil || hidden) && !privacyDot
+        alert == nil && (primary == nil || hidden) && !privacyDot
     }
 
     var size: CGSize {
         let n = notch.size
-        if dropZone { return CGSize(width: max(n.width + 200, 400), height: n.height + 118) }
         if let alert { return CGSize(width: n.width + 2 * (alert.earWidth + Self.flare), height: n.height) }
         if expanded, let p = primary {
             return CGSize(width: max(n.width + 300, 480), height: n.height + ActivityViews.expandedHeight(p))
