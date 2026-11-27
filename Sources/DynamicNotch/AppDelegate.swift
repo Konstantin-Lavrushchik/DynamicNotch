@@ -6,10 +6,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: NotchPanelController?
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var launchedAtLogin = false
+    private var iconsWereHidden = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // macOS marks the launch event when it starts the app as a login item.
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        launchedAtLogin = event?.eventID == kAEOpenApplication
+            && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Prefs.registerDefaults()
-        quitOtherCopies()
+        let replacedRunningCopy = quitOtherCopies()
         panel = NotchPanelController()
         panel?.show()
 
@@ -28,13 +37,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DownloadsMonitor.shared.start()
         DebugHooks.installIfEnabled()
 
+        iconsWereHidden = iconsHidden
         applyAppearancePrefs()
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.applyAppearancePrefs() }
         }
 
-        // First launch always shows Settings once; after that only if "Start minimized" is off.
-        if !Prefs.on(Prefs.didFirstLaunch) || !Prefs.on(Prefs.startMinimized) {
+        // Settings opens at launch: the first time ever; when "Start minimized" is off; and
+        // whenever the user started the app by hand while it has no visible icon (or was
+        // already running) — otherwise opening it would look like nothing happened.
+        let opensByHand = !launchedAtLogin && (iconsHidden || replacedRunningCopy)
+        if !Prefs.on(Prefs.didFirstLaunch) || !Prefs.on(Prefs.startMinimized) || opensByHand {
             UserDefaults.standard.set(true, forKey: Prefs.didFirstLaunch)
             openSettings()
         }
@@ -47,7 +60,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return false
     }
 
+    private var applyingPrefs = false
+    private var appliedMenuBarIcon: Bool?
+
+    /// Called on every UserDefaults change. Changing the status item itself writes to
+    /// UserDefaults too, so this must only act on real changes and never re-enter
+    /// (re-entering crashed the app with endless recursion).
     private func applyAppearancePrefs() {
+        guard !applyingPrefs else { return }
+        applyingPrefs = true
+        defer { applyingPrefs = false }
+
         let dock = Prefs.on(Prefs.showDockIcon)
         let policy: NSApplication.ActivationPolicy = dock ? .regular : .accessory
         if NSApp.activationPolicy() != policy {
@@ -57,16 +80,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 DispatchQueue.main.async { NSApp.activate(ignoringOtherApps: true); self.settingsWindow?.makeKeyAndOrderFront(nil) }
             }
         }
-        statusItem?.isVisible = Prefs.on(Prefs.showMenuBarIcon)
+        // Only touch the icon when our own setting changed, so hiding it in System Settings
+        // (Menu Bar) isn't overridden.
+        let menuIcon = Prefs.on(Prefs.showMenuBarIcon)
+        if menuIcon != appliedMenuBarIcon {
+            appliedMenuBarIcon = menuIcon
+            statusItem?.isVisible = menuIcon
+        }
+
+        let hidden = iconsHidden
+        if hidden && !iconsWereHidden {
+            iconsWereHidden = true
+            // After the current change finishes, not inside the notification.
+            DispatchQueue.main.async { self.explainHiddenIcons() }
+        }
+        iconsWereHidden = hidden
+    }
+
+    private var iconsHidden: Bool { !Prefs.on(Prefs.showMenuBarIcon) && !Prefs.on(Prefs.showDockIcon) }
+
+    /// With no Dock or menu bar icon the app has no visible handle, so say how to get back.
+    private func explainHiddenIcons() {
+        let alert = NSAlert()
+        alert.messageText = "Dynamic Notch keeps running"
+        alert.informativeText = "There's no icon in the menu bar or Dock now. To open Settings again, open Dynamic Notch from Applications, Launchpad or Spotlight, or right-click the island."
+        alert.addButton(withTitle: "OK")
+        if let window = settingsWindow, window.isVisible {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     /// Only one island at a time: a newly started copy replaces an older one.
-    private func quitOtherCopies() {
+    /// Returns true when another copy was running.
+    private func quitOtherCopies() -> Bool {
         let me = NSRunningApplication.current
+        var found = false
         for other in NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
         where other.processIdentifier != me.processIdentifier {
             other.terminate()
+            found = true
         }
+        return found
     }
 
     func openSettings() {

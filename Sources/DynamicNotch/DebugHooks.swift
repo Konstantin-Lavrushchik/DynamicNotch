@@ -27,6 +27,7 @@ enum DebugHooks {
         case "record": RecorderProvider.shared.toggle()
         case "expand": model.expand()
         case "settings": (NSApp.delegate as? AppDelegate)?.openSettings()
+        case "pref": if parts.count == 3 { UserDefaults.standard.set(parts[2] == "1", forKey: parts[1]) }
         case "closesettings": NSApp.windows.first { $0.title.contains("Settings") }?.performClose(nil)
         case "collapse": model.collapse()
         case "swipe-up": model.swipe(.up)

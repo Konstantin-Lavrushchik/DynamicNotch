@@ -8,6 +8,7 @@ swift build -c release --arch arm64
 APP="build/DynamicNotch.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+touch build/.metadata_never_index   # keep Spotlight from offering this dev copy
 BIN="$(swift build -c release --arch arm64 --show-bin-path)"
 cp "$BIN/DynamicNotch" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/"
