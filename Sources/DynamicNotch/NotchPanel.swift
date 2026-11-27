@@ -3,6 +3,13 @@ import SwiftUI
 
 /// Borderless, transparent panel over the notch. It only takes mouse events while the pointer
 /// is over the island itself, so the rest of the panel never blocks the menu bar or apps.
+/// The island never becomes the active app, so every click on it is a "first mouse" click.
+/// NSHostingView refuses those by default (the click only focuses the window), which
+/// swallowed taps and press-and-hold. Accept them.
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -34,8 +41,9 @@ final class NotchPanelController {
         panel.ignoresMouseEvents = true
         panel.acceptsMouseMovedEvents = true
         panel.isReleasedWhenClosed = false
+        panel.becomesKeyOnlyIfNeeded = true
 
-        let host = NSHostingView(rootView: IslandRootView())
+        let host = FirstMouseHostingView(rootView: IslandRootView())
         host.frame = CGRect(origin: .zero, size: Self.panelSize)
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
@@ -175,7 +183,11 @@ final class NotchPanelController {
             scrollLocked = false
             return
         }
-        guard !scrollLocked, event.hasPreciseScrollingDeltas else { return }
+        if !event.hasPreciseScrollingDeltas {
+            handleWheel(event)
+            return
+        }
+        guard !scrollLocked else { return }
         // Physical finger direction, independent of the natural-scrolling setting.
         let sign: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
         scrollAccum.width += event.scrollingDeltaX * sign
@@ -191,5 +203,18 @@ final class NotchPanelController {
             model.swipe(.down)
             scrollLocked = true
         }
+    }
+
+    /// Mouse scroll wheel: one notch = one swipe (wheel up = collapse, down = expand,
+    /// sideways / Shift-wheel = hide), at most one every half second.
+    private var lastWheelSwipe = Date.distantPast
+
+    private func handleWheel(_ event: NSEvent) {
+        guard Date().timeIntervalSince(lastWheelSwipe) > 0.5 else { return }
+        let sign: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
+        let dx = event.scrollingDeltaX * sign, dy = event.scrollingDeltaY * sign
+        guard max(abs(dx), abs(dy)) >= 0.5 else { return }
+        lastWheelSwipe = Date()
+        if abs(dx) > abs(dy) { model.swipe(.sideways) } else { model.swipe(dy > 0 ? .up : .down) }
     }
 }

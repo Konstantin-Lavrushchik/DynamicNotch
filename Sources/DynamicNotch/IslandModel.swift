@@ -170,8 +170,15 @@ final class IslandModel: ObservableObject {
     /// Click on the island. Like a tap on iPhone it opens the app behind the activity.
     func tap() {
         guard let p = primary, !hidden else { return }
-        ActivityActions.open(p)
-        if expanded { collapse() }
+        if ActivityActions.hasApp(p) {
+            ActivityActions.open(p)
+            if expanded { collapse() }
+        } else if expanded {
+            collapse()
+        } else {
+            // Timer, stopwatch, voice memo… have no app on the Mac: a click opens the island.
+            expand()
+        }
     }
 
     func setDropZone(_ on: Bool) {

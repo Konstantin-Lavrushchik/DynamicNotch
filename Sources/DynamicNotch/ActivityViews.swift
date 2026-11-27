@@ -69,12 +69,13 @@ enum ActivityViews {
 @MainActor
 enum ActivityActions {
     /// A click on the island opens the app behind the activity, like a tap on iPhone.
+    static func hasApp(_ id: ActivityID) -> Bool { id == .music || id == .download }
+
     static func open(_ id: ActivityID) {
         switch id {
         case .music: MusicProvider.shared.openApp()
         case .download: DownloadsMonitor.shared.openFolder()
-        case .recording, .timer, .stopwatch, .snooze: IslandModel.shared.expand()
-        case .timerDone, .alarm: break
+        default: break
         }
     }
 }
