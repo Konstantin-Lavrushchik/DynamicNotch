@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>DynamicNotch</string>
+	<key>CFBundleDisplayName</key>
+	<string>Dynamic Notch</string>
+	<key>CFBundleIdentifier</key>
+	<string>app.dynamicnotch.mac</string>
+	<key>CFBundleExecutable</key>
+	<string>DynamicNotch</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Dynamic Notch records voice memos from the island.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Dynamic Notch reads the current song and controls playback in Music and Spotify.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Dynamic Notch shows when AirPods and headphones connect.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Dynamic Notch shows download progress in the island.</string>
+</dict>
+</plist>
