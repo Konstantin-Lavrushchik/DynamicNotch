@@ -146,21 +146,27 @@ struct CompactLayout: View {
         let ear = max(0, (model.size.width - notch.width) / 2 - IslandModel.flare)
         HStack(spacing: 0) {
             Color.clear.frame(width: IslandModel.flare)
+            // Color.clear keeps each ear its full width even when it has nothing to show;
+            // an empty stack would collapse to zero and push everything sideways.
             ZStack {
+                Color.clear
                 if !model.hidden, let p = model.primary {
                     ActivityViews.leading(p).id("lead-\(p.rawValue)").transition(.islandContent)
                 }
             }
             .frame(width: ear, height: notch.height)
             Color.clear.frame(width: notch.width)
-            HStack(spacing: 4) {
-                if !model.hidden, let p = model.primary {
-                    ActivityViews.trailing(p).id("trail-\(p.rawValue)").transition(.islandContent)
-                        .frame(maxWidth: .infinity)
+            ZStack {
+                Color.clear
+                HStack(spacing: 4) {
+                    if !model.hidden, let p = model.primary {
+                        ActivityViews.trailing(p).id("trail-\(p.rawValue)").transition(.islandContent)
+                            .frame(maxWidth: .infinity)
+                    }
+                    if model.privacyDot { PrivacyDot() }
                 }
-                if model.privacyDot { PrivacyDot() }
+                .padding(.trailing, model.privacyDot ? 6 : 0)
             }
-            .padding(.trailing, model.privacyDot ? 6 : 0)
             .frame(width: ear, height: notch.height)
             Color.clear.frame(width: IslandModel.flare)
         }
@@ -260,7 +266,7 @@ struct AlertView: View {
                 }.padding(.trailing, 8)
             }
         case .unlocked:
-            EmptyView()
+            Color.clear   // EmptyView would take no width and shift the whole row right
         case .downloaded(let name):
             Text(name).truncationMode(.middle).foregroundStyle(.white.opacity(0.85)).padding(.trailing, 10)
         case .airdrop(let count):

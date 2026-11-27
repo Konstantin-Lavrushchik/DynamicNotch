@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import CoreImage
 
 /// Now Playing for Apple Music and Spotify. Both apps broadcast a distributed notification on
 /// every play/pause/track change; artwork and position come from their AppleScript dictionaries.
@@ -24,7 +23,7 @@ final class MusicProvider: ObservableObject {
     @Published private(set) var tint: Color = .white
     private var position: Double = 0
     private var positionDate = Date()
-    private var trackKey = ""
+    fileprivate(set) var trackKey = ""
     private var pausedTask: Task<Void, Never>?
 
     func position(at date: Date) -> Double {
@@ -33,17 +32,16 @@ final class MusicProvider: ObservableObject {
     }
 
     func start() {
-        let center = DistributedNotificationCenter.default()
-        center.addObserver(forName: Notification.Name("com.apple.Music.playerInfo"), object: nil, queue: .main) { note in
-            let info = note.userInfo ?? [:]
-            MainActor.assumeIsolated { MusicProvider.shared.handle(info, from: .music) }
+        SystemNotifications.observe("com.apple.Music.playerInfo") { note in
+            MusicProvider.shared.handle(note.userInfo ?? [:], from: .music)
         }
-        center.addObserver(forName: Notification.Name("com.spotify.client.PlaybackStateChanged"), object: nil, queue: .main) { note in
-            let info = note.userInfo ?? [:]
-            MainActor.assumeIsolated { MusicProvider.shared.handle(info, from: .spotify) }
+        SystemNotifications.observe("com.spotify.client.PlaybackStateChanged") { note in
+            MusicProvider.shared.handle(note.userInfo ?? [:], from: .spotify)
         }
         // Pick up a song that was already playing when we launched.
-        for s in [Source.spotify, .music] where isRunning(s) { refresh(from: s) }
+        if Prefs.on(Prefs.showMusic) {
+            for s in [Source.spotify, .music] where isRunning(s) { refresh(from: s) }
+        }
     }
 
     private func isRunning(_ s: Source) -> Bool {
@@ -51,6 +49,11 @@ final class MusicProvider: ObservableObject {
     }
 
     private func handle(_ info: [AnyHashable: Any], from s: Source) {
+        // Turned off in Settings: don't run any AppleScript at all.
+        guard Prefs.on(Prefs.showMusic) else {
+            if source != nil { clear() }
+            return
+        }
         let state = (info["Player State"] as? String) ?? ""
         if state == "Stopped" || !isRunning(s) {
             if source == s { clear() }
@@ -79,6 +82,19 @@ final class MusicProvider: ObservableObject {
     }
 
     private func refresh(from s: Source) {
+        if s == .music {
+            MusicEvents.run({ MusicEvents.nowPlaying() }) { [weak self] now in
+                guard let self, let now else { return }
+                self.handle([
+                    "Player State": now.playing ? "Playing" : "Paused",
+                    "Name": now.name,
+                    "Artist": now.artist,
+                    "Total Time": now.duration * 1000,
+                    "Playback Position": now.position,
+                ], from: .music)
+            }
+            return
+        }
         let script = """
         tell application "\(s.scriptName)"
             if player state is stopped then return {"stopped"}
@@ -103,11 +119,16 @@ final class MusicProvider: ObservableObject {
 
     private func syncPosition() {
         guard let s = source, isRunning(s) else { return }
-        AppleScript.run("tell application \"\(s.scriptName)\" to get player position") { [weak self] r in
-            guard let self, let p = r?.doubleValue else { return }
+        let apply: @MainActor (Double?) -> Void = { [weak self] p in
+            guard let self, let p else { return }
             self.position = p
             self.positionDate = Date()
             self.objectWillChange.send()
+        }
+        if s == .music {
+            MusicEvents.run({ MusicEvents.position() }, then: apply)
+        } else {
+            AppleScript.run("tell application \"\(s.scriptName)\" to get player position") { r in apply(r?.doubleValue) }
         }
     }
 
@@ -115,27 +136,50 @@ final class MusicProvider: ObservableObject {
         let key = trackKey
         switch s {
         case .music:
-            AppleScript.run("tell application \"Music\" to get raw data of artwork 1 of current track") { [weak self] r in
-                guard let self, key == self.trackKey, let data = r?.data, let image = NSImage(data: data) else { return }
-                self.setArtwork(image)
+            MusicEvents.run({ MusicEvents.artworkData() }) { [weak self] data in
+                guard let self, key == self.trackKey, let data else { return }
+                self.setArtwork(data: data, key: key)
             }
         case .spotify:
             AppleScript.run("tell application \"Spotify\" to get artwork url of current track") { [weak self] r in
                 guard let url = r?.stringValue.flatMap(URL.init(string:)), url.scheme == "https" else { return }
                 Task { @MainActor [weak self] in
                     guard let (data, _) = try? await URLSession.shared.data(from: url),
-                          let image = NSImage(data: data), let self, key == self.trackKey else { return }
-                    self.setArtwork(image)
+                          let self, key == self.trackKey else { return }
+                    self.setArtwork(data: data, key: key)
                 }
             }
         }
     }
 
-    private func setArtwork(_ image: NSImage) {
-        withAnimation(.islandSoft) {
-            artwork = image
-            tint = Self.averageColor(of: image)
+    /// Album art arrives full size (often 3000 × 3000 px ≈ 36 MB decoded). The island shows it
+    /// at 50 pt at most, so make a small thumbnail straight from the compressed data, off the
+    /// main thread, and never keep the big image.
+    private func setArtwork(data: Data, key: String) {
+        let box = UncheckedBox(data)
+        Task.detached(priority: .utility) {
+            guard let thumb = Self.thumbnail(box.value, maxPixels: 128) else { return }
+            let tint = Self.averageColor(of: thumb)
+            let image = UncheckedBox(NSImage(cgImage: thumb, size: NSSize(width: 64, height: 64)))
+            await MainActor.run {
+                guard key == MusicProvider.shared.trackKey else { return }
+                withAnimation(.islandSoft) {
+                    MusicProvider.shared.artwork = image.value
+                    MusicProvider.shared.tint = tint
+                }
+            }
         }
+    }
+
+    nonisolated static func thumbnail(_ data: Data, maxPixels: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     private func updateActivity() {
@@ -164,16 +208,20 @@ final class MusicProvider: ObservableObject {
 
     // MARK: Controls
 
-    func togglePlay() { command("playpause"); isPlaying.toggle(); position = position(at: Date()); positionDate = Date() }
-    func next() { command("next track") }
-    func previous() { command("previous track") }
+    func togglePlay() { command("playpause", MusicEvents.playPause); isPlaying.toggle(); position = position(at: Date()); positionDate = Date() }
+    func next() { command("next track", MusicEvents.nextTrack) }
+    func previous() { command("previous track", MusicEvents.previousTrack) }
 
     func seek(to seconds: Double) {
         guard let s = source else { return }
         position = seconds
         positionDate = Date()
         objectWillChange.send()
-        AppleScript.run("tell application \"\(s.scriptName)\" to set player position to \(seconds)")
+        if s == .music {
+            MusicEvents.run({ MusicEvents.setPosition(seconds) }) { _ in }
+        } else {
+            AppleScript.run("tell application \"\(s.scriptName)\" to set player position to \(seconds)")
+        }
     }
 
     func openApp() {
@@ -181,23 +229,26 @@ final class MusicProvider: ObservableObject {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
-    private func command(_ verb: String) {
+    /// Music gets raw Apple Events; Spotify (rarely used here) still goes through AppleScript.
+    private func command(_ verb: String, _ musicEvent: @escaping () -> Void) {
         guard let s = source, isRunning(s) else { return }
-        AppleScript.run("tell application \"\(s.scriptName)\" to \(verb)")
+        if s == .music {
+            MusicEvents.run(musicEvent) { _ in }
+        } else {
+            AppleScript.run("tell application \"\(s.scriptName)\" to \(verb)")
+        }
     }
 
     // MARK: Artwork colour (the waveform takes the album's colour, as on iPhone)
 
-    private static let ciContext = CIContext(options: [.workingColorSpace: NSNull()])
-
-    static func averageColor(of image: NSImage) -> Color {
-        guard let tiff = image.tiffRepresentation, let ci = CIImage(data: tiff),
-              let filter = CIFilter(name: "CIAreaAverage",
-                                    parameters: [kCIInputImageKey: ci, kCIInputExtentKey: CIVector(cgRect: ci.extent)]),
-              let output = filter.outputImage else { return .white }
+    /// Average colour of a (small) image, by drawing it into a single pixel.
+    nonisolated static func averageColor(of image: CGImage) -> Color {
         var px = [UInt8](repeating: 0, count: 4)
-        ciContext.render(output, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-                         format: .RGBA8, colorSpace: nil)
+        guard let ctx = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return .white }
+        ctx.interpolationQuality = .medium
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         NSColor(red: CGFloat(px[0]) / 255, green: CGFloat(px[1]) / 255, blue: CGFloat(px[2]) / 255, alpha: 1)
             .getHue(&h, saturation: &s, brightness: &b, alpha: &a)

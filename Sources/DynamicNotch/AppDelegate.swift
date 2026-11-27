@@ -44,11 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             MainActor.assumeIsolated { self?.applyAppearancePrefs() }
         }
 
-        // Settings opens at launch: the first time ever; when "Start minimized" is off; and
-        // whenever the user started the app by hand while it has no visible icon (or was
-        // already running) — otherwise opening it would look like nothing happened.
-        let opensByHand = !launchedAtLogin && (iconsHidden || replacedRunningCopy)
-        if !Prefs.on(Prefs.didFirstLaunch) || !Prefs.on(Prefs.startMinimized) || opensByHand {
+        // Settings opens at launch only the first time ever, when "Start minimized" is off, or
+        // when this copy replaced one that was already running (the user opened it again).
+        // "Start minimized" always wins otherwise: Login Items launches can't be told apart
+        // from manual ones reliably, and Settings must not pop up when the Mac starts.
+        // Opening the app while it runs still shows Settings (applicationShouldHandleReopen).
+        if !Prefs.on(Prefs.didFirstLaunch) || !Prefs.on(Prefs.startMinimized) || (replacedRunningCopy && !launchedAtLogin) {
             UserDefaults.standard.set(true, forKey: Prefs.didFirstLaunch)
             openSettings()
         }

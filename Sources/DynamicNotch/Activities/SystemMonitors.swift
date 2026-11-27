@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import IOKit.ps
 import IOBluetooth
+import CoreBluetooth
 import CoreAudio
 import AudioToolbox
 
@@ -56,13 +57,39 @@ final class BatteryMonitor {
 // MARK: - AirPods / headphones connected
 
 @MainActor
-final class BluetoothMonitor: NSObject {
+final class BluetoothMonitor: NSObject, CBCentralManagerDelegate {
     static let shared = BluetoothMonitor()
     private var connectNote: IOBluetoothUserNotification?
-    private let startedAt = Date()
+    private var central: CBCentralManager?
+    private var startedAt = Date()
 
+    /// IOBluetooth blocks the calling thread until Bluetooth permission is answered, which froze
+    /// the whole app at launch. So ask through CoreBluetooth first (non-blocking prompt) and only
+    /// register with IOBluetooth once access is allowed.
     func start() {
+        switch CBManager.authorization {
+        case .allowedAlways:
+            register()
+        case .notDetermined:
+            central = CBCentralManager(delegate: self, queue: .main)
+        default:
+            break   // denied or restricted: no headphone alerts
+        }
+    }
+
+    private func register() {
+        guard connectNote == nil else { return }
+        startedAt = Date()
         connectNote = IOBluetoothDevice.register(forConnectNotifications: self, selector: #selector(connected(_:device:)))
+    }
+
+    nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        MainActor.assumeIsolated {
+            if CBManager.authorization == .allowedAlways {
+                self.central = nil
+                self.register()
+            }
+        }
     }
 
     @objc private func connected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
@@ -218,14 +245,11 @@ final class LockMonitor {
     static let shared = LockMonitor()
 
     func start() {
-        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"),
-                                                            object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated {
-                guard Prefs.on(Prefs.showUnlock) else { return }
-                // Wait until the desktop is visible again so the animation is actually seen.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    MainActor.assumeIsolated { IslandModel.shared.show(.unlocked, for: 1.6) }
-                }
+        SystemNotifications.observe("com.apple.screenIsUnlocked") { _ in
+            guard Prefs.on(Prefs.showUnlock) else { return }
+            // Wait until the desktop is visible again so the animation is actually seen.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                MainActor.assumeIsolated { IslandModel.shared.show(.unlocked, for: 1.6) }
             }
         }
     }
@@ -251,7 +275,7 @@ final class DownloadsMonitor: ObservableObject {
     static let shared = DownloadsMonitor()
     @Published private(set) var items: [DownloadItem] = []
     private var timer: Timer?
-    private static let tempExtensions = ["download", "crdownload", "part", "opdownload", "partial"]
+    nonisolated private static let tempExtensions = ["download", "crdownload", "part", "opdownload", "partial"]
 
     var folder: URL { FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0] }
 
@@ -268,17 +292,47 @@ final class DownloadsMonitor: ObservableObject {
         }
     }
 
+    private var scanning = false
+    private static let scanQueue = DispatchQueue(label: "dynamicnotch.downloads", qos: .utility)
+
+    /// The folder is read on a background queue: the first read triggers macOS's Downloads
+    /// permission prompt, which blocks the reading thread until answered.
     private func poll() {
         guard Prefs.on(Prefs.showDownloads) else {
             if !items.isEmpty { items = []; IslandModel.shared.setActive(.download, false) }
             return
         }
+        guard !scanning else { return }
+        scanning = true
+        let folder = self.folder
+        Self.scanQueue.async {
+            let found = Self.scan(folder)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { DownloadsMonitor.shared.apply(found, folder: folder) }
+            }
+        }
+    }
+
+    private func apply(_ found: [DownloadItem]?, folder: URL) {
+        scanning = false
+        guard let found else { return }
+        // Finished = temp file gone and the real file is there.
+        for old in items where !found.contains(where: { $0.tempName == old.tempName }) {
+            if FileManager.default.fileExists(atPath: folder.appendingPathComponent(old.name).path) {
+                IslandModel.shared.show(.downloaded(name: old.name), for: 3)
+            }
+        }
+        if found != items { items = found }
+        IslandModel.shared.setActive(.download, !found.isEmpty)
+    }
+
+    nonisolated private static func scan(_ folder: URL) -> [DownloadItem]? {
         let fm = FileManager.default
-        guard let names = try? fm.contentsOfDirectory(atPath: folder.path) else { return }
+        guard let names = try? fm.contentsOfDirectory(atPath: folder.path) else { return nil }
         var found: [DownloadItem] = []
         for temp in names {
             let ext = (temp as NSString).pathExtension.lowercased()
-            guard Self.tempExtensions.contains(ext) else { continue }
+            guard tempExtensions.contains(ext) else { continue }
             let url = folder.appendingPathComponent(temp)
             var finalName = (temp as NSString).deletingPathExtension
             var bytes: Int64 = 0
@@ -297,14 +351,7 @@ final class DownloadsMonitor: ObservableObject {
             if finalName.hasPrefix("Unconfirmed ") || finalName.hasPrefix(".") { finalName = "File" }
             found.append(DownloadItem(tempName: temp, name: finalName, bytes: bytes, total: total))
         }
-        // Finished = temp file gone and the real file is there.
-        for old in items where !found.contains(where: { $0.tempName == old.tempName }) {
-            if fm.fileExists(atPath: folder.appendingPathComponent(old.name).path) {
-                IslandModel.shared.show(.downloaded(name: old.name), for: 3)
-            }
-        }
-        if found != items { items = found }
-        IslandModel.shared.setActive(.download, !found.isEmpty)
+        return found
     }
 
     func openFolder() { NSWorkspace.shared.open(folder) }

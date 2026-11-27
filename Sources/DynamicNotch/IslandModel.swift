@@ -53,6 +53,7 @@ struct IslandAlert: Identifiable, Equatable {
         case .unlocked: 34
         case .volume: 110
         case .headphones: 104
+        case .lowBattery: 110
         case .downloaded: 120
         default: 96
         }
@@ -247,4 +248,33 @@ final class IslandModel: ObservableObject {
 final class Box<T>: ObservableObject {
     @Published var v: T
     init(_ v: T) { self.v = v }
+}
+
+/// Listens to system-wide notifications with "deliver immediately". The block-based API uses
+/// the default suspension behaviour, so a background app (which this always is) got them
+/// late or coalesced — unlock and song changes showed up late.
+@MainActor
+enum SystemNotifications {
+    private final class Observer: NSObject {
+        let handler: @MainActor (Notification) -> Void
+        init(_ handler: @escaping @MainActor (Notification) -> Void) { self.handler = handler }
+        @objc func fire(_ note: Notification) {
+            let box = UncheckedBox(note)
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { handler(box.value) }
+            } else {
+                DispatchQueue.main.async { MainActor.assumeIsolated { self.handler(box.value) } }
+            }
+        }
+    }
+
+    private static var observers: [Observer] = []
+
+    static func observe(_ name: String, _ handler: @escaping @MainActor (Notification) -> Void) {
+        let observer = Observer(handler)
+        observers.append(observer)
+        DistributedNotificationCenter.default().addObserver(observer, selector: #selector(Observer.fire(_:)),
+                                                            name: Notification.Name(name), object: nil,
+                                                            suspensionBehavior: .deliverImmediately)
+    }
 }

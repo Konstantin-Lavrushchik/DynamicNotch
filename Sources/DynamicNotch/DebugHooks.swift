@@ -8,10 +8,8 @@ import AppKit
 enum DebugHooks {
     static func installIfEnabled() {
         guard ProcessInfo.processInfo.environment["DYNAMICNOTCH_DEBUG"] == "1" else { return }
-        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("app.dynamicnotch.debug"),
-                                                            object: nil, queue: .main) { note in
-            let command = note.object as? String ?? ""
-            MainActor.assumeIsolated { run(command) }
+        SystemNotifications.observe("app.dynamicnotch.debug") { note in
+            run(note.object as? String ?? "")
         }
     }
 
@@ -32,6 +30,9 @@ enum DebugHooks {
         case "expand": model.expand()
         case "settings": (NSApp.delegate as? AppDelegate)?.openSettings()
         case "pref": if parts.count == 3 { UserDefaults.standard.set(parts[2] == "1", forKey: parts[1]) }
+        case "state":
+            NSLog("DynamicNotch music: source=%@ title=%@ artist=%@ playing=%d artwork=%d dur=%.0f pos=%.0f", String(describing: MusicProvider.shared.source), MusicProvider.shared.title, MusicProvider.shared.artist, MusicProvider.shared.isPlaying ? 1 : 0, MusicProvider.shared.artwork == nil ? 0 : 1, MusicProvider.shared.duration, MusicProvider.shared.position(at: Date()))
+            NSLog("DynamicNotch state: alert=%@ active=%@ primary=%@ expanded=%d hidden=%d size=%@ mic=%d cam=%d", String(describing: model.alert?.kind), String(describing: model.active.sorted().map { "\($0)" }), String(describing: model.primary), model.expanded ? 1 : 0, model.hidden ? 1 : 0, NSStringFromSize(model.size), model.micInUse ? 1 : 0, model.cameraInUse ? 1 : 0)
         case "closesettings": NSApp.windows.first { $0.title.contains("Settings") }?.performClose(nil)
         case "collapse": model.collapse()
         case "swipe-up": model.swipe(.up)
